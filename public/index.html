@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en" ng-app="financeApp" ng-csp>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Atlas Finance</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body ng-controller="FinanceController as vm" ng-cloak>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">◈</span><span>atlas<span class="brand-dot">.</span><small>PERSONAL FINANCE</small></span></div>
+      <div class="sidebar-label">WORKSPACE</div>
+      <nav class="nav-list" aria-label="Main navigation">
+        <button ng-class="{active: vm.page === 'overview'}" ng-click="vm.setPage('overview')"><span class="nav-icon">▦</span> Overview</button>
+        <button ng-class="{active: vm.page === 'accounts'}" ng-click="vm.setPage('accounts')"><span class="nav-icon">▣</span> Accounts</button>
+        <button ng-class="{active: vm.page === 'purchases'}" ng-click="vm.setPage('purchases')"><span class="nav-icon">≡</span> Purchases</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="privacy-card"><span class="privacy-icon">✦</span><strong>Your space, your numbers.</strong><p>Everything you enter stays in your local MySQL database.</p></div>
+        <div class="sidebar-foot"><span class="status-dot"></span> LOCAL WORKSPACE <span class="sidebar-version">v1.0</span></div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar"><span class="breadcrumb">Workspace <span>/</span> <strong>{{vm.pageLabel}}</strong></span><div class="topbar-right"><span class="today-label">{{vm.todayLabel}}</span><span class="avatar">ME</span></div></header>
+      <div class="content-wrap">
+        <div class="error-banner" ng-if="vm.error && !vm.modal"><span>⚠</span><span>{{vm.error}}</span><button ng-click="vm.error = ''" aria-label="Dismiss error">×</button></div>
+        <div class="toast" ng-if="vm.notice">{{vm.notice}}</div>
+
+        <section ng-if="vm.page === 'overview'">
+          <div class="page-heading"><div><div class="eyebrow">YOUR FINANCIAL PICTURE</div><h1>Overview</h1><p>A clear view of where things stand, week by week.</p></div><button class="button button-primary" ng-click="vm.openPurchase()"><span>＋</span> Add purchase</button></div>
+          <div class="metrics-grid">
+            <div class="metric-card featured"><div class="metric-top"><span>Total balance</span><span class="metric-glyph">↗</span></div><div class="metric-value">{{vm.totalBalance | currency}}</div><div class="metric-sub">Latest recorded balance across accounts</div></div>
+            <div class="metric-card"><div class="metric-top"><span>Accounts</span><span class="metric-mini-icon purple">▣</span></div><div class="metric-value">{{vm.accounts.length}}</div><div class="metric-sub">{{vm.accounts.length === 1 ? 'Account' : 'Accounts'}} being tracked</div></div>
+            <div class="metric-card"><div class="metric-top"><span>Spent this month</span><span class="metric-mini-icon coral">↗</span></div><div class="metric-value">{{vm.monthSpending | currency}}</div><div class="metric-sub">From manually entered purchases</div></div>
+          </div>
+          <div class="dashboard-grid">
+            <div class="panel chart-panel"><div class="panel-header"><div><div class="eyebrow">BALANCE HISTORY</div><h2>Accounts over time</h2><p>Weekly balance snapshots</p></div><span class="panel-badge">Weekly</span></div><div class="chart-area" ng-if="vm.balances.length"><canvas id="balanceChart" aria-label="Weekly account balances" role="img"></canvas></div><div class="empty-chart" ng-if="!vm.balances.length"><div class="empty-icon">⌁</div><h3>Your chart starts here</h3><p>Add an account and record a weekly balance to see your history.</p><button class="button button-primary" ng-click="vm.openAccount()">Add an account</button></div><div class="chart-legend" ng-if="vm.balances.length"><span ng-repeat="account in vm.accounts"><i ng-style="{'background-color': account.color}"></i>{{account.name}}</span></div></div>
+            <div class="panel snapshot-panel"><div class="panel-header"><div><div class="eyebrow">AT A GLANCE</div><h2>Your accounts</h2></div><button class="text-button" ng-click="vm.setPage('accounts')">View all →</button></div><div class="snapshot-list" ng-if="vm.accounts.length"><div class="snapshot-row" ng-repeat="account in vm.accounts"><span class="account-symbol" ng-style="{'background-color': account.color}">{{account.name | initial}}</span><div class="snapshot-name"><strong>{{account.name}}</strong><small>{{account.type}}</small></div><strong class="snapshot-balance">{{account.latest_balance === null ? '—' : (account.latest_balance | currency)}}</strong></div></div><div class="small-empty" ng-if="!vm.accounts.length">No accounts yet. Add one to get started.</div><button class="inline-add" ng-click="vm.openAccount()">＋ Add account</button></div>
+          </div>
+          <div class="panel recent-panel"><div class="panel-header"><div><div class="eyebrow">ACTIVITY</div><h2>Recent purchases</h2></div><button class="text-button" ng-click="vm.setPage('purchases')">View history →</button></div><div ng-if="vm.purchases.length" class="table-scroll"><table><thead><tr><th>Purchase</th><th>Category</th><th>Account</th><th>Date</th><th class="amount-cell">Amount</th></tr></thead><tbody><tr ng-repeat="purchase in vm.purchases | limitTo:5"><td><strong>{{purchase.merchant}}</strong></td><td><span class="category-pill">{{purchase.category}}</span></td><td>{{purchase.account_name || 'Unassigned'}}</td><td>{{purchase.purchase_date | prettyDate}}</td><td class="amount-cell amount-negative">−{{purchase.amount | currency}}</td></tr></tbody></table></div><div class="small-empty" ng-if="!vm.purchases.length">No purchases recorded yet.</div></div>
+        </section>
+
+        <section ng-if="vm.page === 'accounts'">
+          <div class="page-heading"><div><div class="eyebrow">MANAGE YOUR MONEY</div><h1>Accounts</h1><p>Track balances with one snapshot for each week.</p></div><button class="button button-primary" ng-click="vm.openAccount()"><span>＋</span> Add account</button></div>
+          <div class="account-grid" ng-if="vm.accounts.length"><button class="account-card" ng-repeat="account in vm.accounts" ng-class="{selected: vm.selectedAccountId === account.id}" ng-click="vm.selectAccount(account)"><span class="account-card-top"><span class="account-symbol large" ng-style="{'background-color': account.color}">{{account.name | initial}}</span><span class="account-type">{{account.type}}</span></span><span class="account-card-name">{{account.name}}</span><span class="account-card-balance">{{account.latest_balance === null ? 'No balance yet' : (account.latest_balance | currency)}}</span><span class="account-card-date">{{account.latest_week ? ('As of ' + (account.latest_week | prettyDate)) : 'Add your first weekly balance'}}</span></button></div>
+          <div class="page-empty" ng-if="!vm.accounts.length"><div class="empty-icon">▣</div><h2>No accounts yet</h2><p>Start by adding an account. You can import weekly balances from an Excel file or enter them by hand.</p><button class="button button-primary" ng-click="vm.openAccount()">Add your first account</button></div>
+          <div class="panel balance-panel" ng-if="vm.selectedAccount"><div class="panel-header"><div><div class="eyebrow">WEEKLY SNAPSHOTS</div><h2>{{vm.selectedAccount.name}} balance history</h2><p>Record your account balance for any week. Saving the same week updates it.</p></div></div><form class="balance-form" ng-submit="vm.saveBalance()"><label>Week of <input type="date" ng-model="vm.balanceForm.week" required></label><label>Balance <div class="input-prefix"><span>$</span><input type="number" step="0.01" ng-model="vm.balanceForm.balance" placeholder="0.00" required></div></label><button class="button button-primary" type="submit" ng-disabled="vm.saving">Save balance</button></form><div class="table-scroll" ng-if="vm.selectedBalances.length"><table><thead><tr><th>Week starting</th><th class="amount-cell">Balance</th></tr></thead><tbody><tr ng-repeat="row in vm.selectedBalances"><td>{{row.week_start | prettyDate}}</td><td class="amount-cell"><strong>{{row.balance | currency}}</strong></td></tr></tbody></table></div><div class="small-empty" ng-if="!vm.selectedBalances.length">No weekly balances for this account yet.</div></div>
+        </section>
+
+        <section ng-if="vm.page === 'purchases'">
+          <div class="page-heading"><div><div class="eyebrow">YOUR SPENDING STORY</div><h1>Purchases</h1><p>Every purchase you enter, all in one place.</p></div><button class="button button-primary" ng-click="vm.openPurchase()"><span>＋</span> Add purchase</button></div>
+          <div class="purchase-summary"><div><span>Total purchases</span><strong>{{vm.purchases.length}}</strong></div><div><span>Spent this month</span><strong>{{vm.monthSpending | currency}}</strong></div><div><span>All-time spending</span><strong>{{vm.allTimeSpending | currency}}</strong></div></div>
+          <div class="panel purchase-panel"><div class="panel-header"><div><div class="eyebrow">HISTORY</div><h2>Purchase log</h2></div><label class="search-box"><span>⌕</span><input type="search" ng-model="vm.purchaseSearch" placeholder="Search purchases"></label></div><div class="table-scroll" ng-if="vm.purchases.length"><table><thead><tr><th>Purchase</th><th>Category</th><th>Account</th><th>Date</th><th class="amount-cell">Amount</th><th class="action-cell"></th></tr></thead><tbody><tr ng-repeat="purchase in vm.purchases | filter:vm.purchaseSearch"><td><strong>{{purchase.merchant}}</strong><small class="table-note" ng-if="purchase.note">{{purchase.note}}</small></td><td><span class="category-pill">{{purchase.category}}</span></td><td>{{purchase.account_name || 'Unassigned'}}</td><td>{{purchase.purchase_date | prettyDate}}</td><td class="amount-cell amount-negative">−{{purchase.amount | currency}}</td><td class="action-cell"><button class="icon-button" aria-label="Delete purchase" title="Delete purchase" ng-click="vm.deletePurchase(purchase)">×</button></td></tr></tbody></table></div><div class="small-empty" ng-if="!vm.purchases.length">Your purchase log is empty. Add a purchase to start tracking spending.</div></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" ng-if="vm.modal" ng-click="vm.closeModal()"><div class="modal" role="dialog" aria-modal="true" ng-click="$event.stopPropagation()"><div class="modal-header"><div><div class="eyebrow">{{vm.modal === 'account' ? 'NEW ACCOUNT' : 'NEW TRANSACTION'}}</div><h2>{{vm.modal === 'account' ? 'Add an account' : 'Add a purchase'}}</h2></div><button class="close-button" ng-click="vm.closeModal()" aria-label="Close">×</button></div><div class="modal-error" ng-if="vm.error">{{vm.error}}</div>
+    <form ng-if="vm.modal === 'account'" ng-submit="vm.saveAccount()"><div class="modal-body"><label>Account name<input type="text" ng-model="vm.accountForm.name" maxlength="100" placeholder="e.g. Everyday Checking" required autofocus></label><div class="form-two"><label>Type<select ng-model="vm.accountForm.type" ng-options="type for type in vm.accountTypes" required></select></label><label>Color<select ng-model="vm.accountForm.color" ng-options="color.value as color.name for color in vm.colors"></select></label></div><div class="upload-box"><span class="upload-symbol">⇧</span><strong>Import weekly balances</strong><p>Optional Excel file with Week and Balance columns.</p><input type="file" accept=".xlsx" file-model="vm.accountForm.file" aria-label="Excel spreadsheet"><a href="/api/template" download="weekly-balances-template.xlsx">Download Excel template</a></div></div><div class="modal-actions"><button type="button" class="button button-ghost" ng-click="vm.closeModal()">Cancel</button><button type="submit" class="button button-primary" ng-disabled="vm.saving">{{vm.saving ? 'Saving…' : 'Create account'}}</button></div></form>
+    <form ng-if="vm.modal === 'purchase'" ng-submit="vm.savePurchase()"><div class="modal-body"><div class="form-two"><label>Merchant or description<input type="text" ng-model="vm.purchaseForm.merchant" maxlength="120" placeholder="e.g. Grocery store" required autofocus></label><label>Amount<div class="input-prefix"><span>$</span><input type="number" min="0.01" step="0.01" ng-model="vm.purchaseForm.amount" placeholder="0.00" required></div></label></div><div class="form-two"><label>Date<input type="date" ng-model="vm.purchaseForm.purchase_date" required></label><label>Category<select ng-model="vm.purchaseForm.category" ng-options="category for category in vm.categories" required></select></label></div><label>Account <span class="optional">(optional)</span><select ng-model="vm.purchaseForm.account_id" ng-options="account.id as account.name for account in vm.accounts"><option value="">Unassigned</option></select></label><label>Note <span class="optional">(optional)</span><textarea ng-model="vm.purchaseForm.note" maxlength="500" rows="3" placeholder="Anything you want to remember"></textarea></label></div><div class="modal-actions"><button type="button" class="button button-ghost" ng-click="vm.closeModal()">Cancel</button><button type="submit" class="button button-primary" ng-disabled="vm.saving">{{vm.saving ? 'Saving…' : 'Save purchase'}}</button></div></form>
+  </div></div>
+
+  <script src="/vendor/angular.js"></script>
+  <script src="/vendor/chart.umd.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

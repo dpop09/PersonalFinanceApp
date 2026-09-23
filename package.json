@@ -1,0 +1,24 @@
+{
+  "name": "personal-finance-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local personal finance desktop app",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:web": "node server/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "angular": "1.8.3",
+    "chart.js": "^4.5.0",
+    "dotenv": "^17.0.0",
+    "exceljs": "^4.4.0",
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
+    "mysql2": "^3.14.0"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0"
+  }
+}
