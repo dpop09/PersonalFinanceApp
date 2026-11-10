@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
-async function setup(purchases) {
+async function setup(purchases, categories = ['Food & Drink', 'Groceries', 'Shopping']) {
   let controller;
   let onDestroy;
   let rows = purchases;
@@ -23,8 +23,16 @@ async function setup(purchases) {
   const timeout = (callback, delay) => { if (!delay) pending.push(callback); };
   timeout.cancel = () => {};
   const http = {
-    get: url => Promise.resolve({ data: url === '/api/purchases' ? rows : [] }),
-    post: (_url, purchase) => { rows = [...rows, { ...purchase, id: rows.length + 1 }]; return Promise.resolve({ data: {} }); },
+    get: url => Promise.resolve({ data: url === '/api/purchases' ? rows : url === '/api/categories' ? [...categories] : [] }),
+    post: (url, purchase) => {
+      if (url === '/api/categories') {
+        if (categories.some(name => name.toLowerCase() === purchase.name.toLowerCase())) return Promise.reject({ data: { error: 'A category with this name already exists.' } });
+        categories.push(purchase.name);
+        return Promise.resolve({ data: { name: purchase.name } });
+      }
+      rows = [...rows, { ...purchase, id: rows.length + 1 }];
+      return Promise.resolve({ data: {} });
+    },
     delete: url => { rows = rows.filter(row => row.id !== Number(url.split('/').pop())); return Promise.resolve(); }
   };
   const state = {};
@@ -128,4 +136,68 @@ test('saving and deleting purchases refresh the active breakdown, including cust
   assert.equal(state.spendingTotal, 0);
   assert.equal(state.spendingCount, 0);
   assert.equal(charts.at(-1).destroyed, true);
+});
+
+test('custom categories persist, select automatically, and appear in every chart period', async () => {
+  const categories = ['Food & Drink', 'Groceries'];
+  const { state, charts, flush } = await setup([], categories);
+  state.openPurchase();
+  state.purchaseForm.merchant = 'Vet';
+  state.purchaseForm.amount = 25;
+  state.purchaseForm.purchase_date = new Date(2024, 1, 29);
+  state.creatingCategory = true;
+  state.categoryName = '  Pet care  ';
+  const saving = state.createCategory();
+  assert.equal(state.categorySaving, true);
+  state.closeModal();
+  assert.equal(state.modal, 'purchase');
+  await saving;
+  assert.equal(state.purchaseForm.category, 'Pet care');
+  assert.equal(state.purchaseForm.merchant, 'Vet');
+  assert.equal(state.creatingCategory, false);
+  state.savePurchase();
+  await flush();
+  state.spendingYear = '2024';
+  state.spendingMonth = '02';
+  state.setPage('spending');
+  let color;
+  for (const period of ['month', 'year', 'all']) {
+    state.spendingPeriod = period;
+    state.updateSpending();
+    await flush();
+    assert.equal(state.spendingCategories[0].name, 'Pet care');
+    assert.equal(state.spendingCategories[0].percentage, 100);
+    assert.equal(charts.at(-1).config.data.labels[0], 'Pet care');
+    color = color || state.spendingCategories[0].color;
+    assert.equal(state.spendingCategories[0].color, color);
+  }
+  state.deletePurchase(state.purchases[0]);
+  await flush();
+  assert.ok(state.categories.includes('Pet care'));
+  const reopened = await setup([], categories);
+  assert.ok(reopened.state.categories.includes('Pet care'));
+});
+
+test('category errors preserve the purchase draft and cancellation restores purchase saving', async () => {
+  const { state, flush } = await setup([]);
+  state.openPurchase();
+  state.purchaseForm.merchant = 'Lunch';
+  state.creatingCategory = true;
+  for (const invalid of ['  ', 'x'.repeat(61)]) {
+    state.categoryName = invalid;
+    await state.createCategory();
+    assert.match(state.categoryError, /up to 60/);
+  }
+  state.categoryName = 'groceries';
+  await state.createCategory();
+  assert.match(state.categoryError, /already exists/);
+  assert.equal(state.categorySaving, false);
+  assert.equal(state.purchaseForm.category, 'Food & Drink');
+  assert.equal(state.purchaseForm.merchant, 'Lunch');
+  state.savePurchase();
+  await flush();
+  assert.equal(state.purchases.length, 0);
+  state.cancelCategory();
+  assert.equal(state.creatingCategory, false);
+  assert.equal(state.categoryError, '');
 });

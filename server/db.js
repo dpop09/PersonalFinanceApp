@@ -1,4 +1,5 @@
 const mysql = require('mysql2/promise');
+const { initializeCategories } = require('./categories');
 
 let pool;
 
@@ -57,6 +58,7 @@ async function initializeDatabase() {
       CONSTRAINT fk_purchase_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL
     ) ENGINE=InnoDB
   `);
+  await initializeCategories(pool);
   return pool;
 }
 

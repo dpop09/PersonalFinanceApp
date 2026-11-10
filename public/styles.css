@@ -18,3 +18,8 @@
 @media(max-width:1170px){.spending-breakdown{grid-template-columns:1fr}.spending-chart{height:320px}}
 @media(max-width:760px){.spending-breakdown{padding:0 14px 20px;gap:16px}.spending-chart{height:260px}.spending-panel .panel-header{flex-wrap:wrap}.spending-filters{gap:12px}.period-switch button{padding:10px 14px}}
 @media(max-width:760px){.spending-page .page-heading{flex-direction:column;gap:16px}.category-table td:first-child{min-width:110px}}
+.purchase-category .text-button{margin-top:8px;font-size:12px}
+.category-editor{padding:16px;background:#faf9ff;border:1px solid #e6e0fa;border-radius:10px}
+.category-editor p{font-size:12px;line-height:1.5;color:#687083;margin:10px 0}
+.category-editor .category-error{color:#a74949}
+.category-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}

@@ -98,6 +98,23 @@ app.post('/api/accounts/:id/balances', asyncRoute(async (req, res) => {
   res.status(201).json({ account_id: id, week_start: week, balance });
 }));
 
+app.get('/api/categories', asyncRoute(async (_req, res) => {
+  const [rows] = await getPool().query('SELECT name FROM purchase_categories ORDER BY name');
+  res.json(rows.map(row => row.name));
+}));
+
+app.post('/api/categories', asyncRoute(async (req, res) => {
+  const name = cleanString(req.body?.name, 60);
+  if (!name || name.length > 60) return fail(res, 400, 'Enter a category name (up to 60 characters).');
+  try {
+    await getPool().execute('INSERT INTO purchase_categories (name) VALUES (?)', [name]);
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') return fail(res, 409, 'A category with this name already exists.');
+    throw error;
+  }
+  res.status(201).json({ name });
+}));
+
 app.get('/api/purchases', asyncRoute(async (_req, res) => {
   const [rows] = await getPool().query(`SELECT p.id, p.account_id, p.purchase_date, p.merchant, p.category, p.amount, p.note, a.name AS account_name
     FROM purchases p LEFT JOIN accounts a ON a.id = p.account_id ORDER BY p.purchase_date DESC, p.id DESC`);
@@ -119,8 +136,10 @@ app.post('/api/purchases', asyncRoute(async (req, res) => {
     const [accounts] = await getPool().execute('SELECT id FROM accounts WHERE id = ?', [accountId]);
     if (!accounts.length) return fail(res, 400, 'Choose an existing account.');
   }
+  const [categories] = await getPool().execute('SELECT name FROM purchase_categories WHERE name = ?', [category]);
+  if (!categories.length) return fail(res, 400, 'Choose an existing category or create a new one.');
   const [result] = await getPool().execute(`INSERT INTO purchases (account_id, purchase_date, merchant, category, amount, note)
-    VALUES (?, ?, ?, ?, ?, ?)`, [accountId, date, merchant, category, amount, note || null]);
+    VALUES (?, ?, ?, ?, ?, ?)`, [accountId, date, merchant, categories[0].name, amount, note || null]);
   res.status(201).json({ id: result.insertId });
 }));
 

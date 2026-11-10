@@ -28,6 +28,7 @@
     vm.allTimeSpending = 0;
     vm.accountTypes = ['Checking', 'Savings', 'Credit', 'Investment', 'Cash', 'Other'];
     vm.categories = ['Food & Drink', 'Groceries', 'Shopping', 'Transport', 'Bills & Utilities', 'Housing', 'Health', 'Entertainment', 'Travel', 'Education', 'Other'];
+    var defaultCategories = vm.categories.slice();
     vm.spendingPeriod = 'month';
     vm.spendingYear = String(new Date().getFullYear());
     vm.spendingMonth = String(new Date().getMonth() + 1).padStart(2, '0');
@@ -52,10 +53,11 @@
       noticeTimer = $timeout(function () { vm.notice = ''; }, 3500);
     }
     function refresh() {
-      return Promise.all([$http.get('/api/accounts'), $http.get('/api/balances'), $http.get('/api/purchases')]).then(function (results) {
+      return Promise.all([$http.get('/api/accounts'), $http.get('/api/balances'), $http.get('/api/purchases'), $http.get('/api/categories')]).then(function (results) {
         vm.accounts = results[0].data;
         vm.balances = results[1].data;
         vm.purchases = results[2].data;
+        vm.categories = results[3].data;
         vm.updateSpending();
         vm.totalBalance = vm.accounts.reduce(function (sum, item) { return sum + Number(item.latest_balance || 0); }, 0);
         vm.allTimeSpending = vm.purchases.reduce(function (sum, item) { return sum + Number(item.amount); }, 0);
@@ -113,7 +115,7 @@
       vm.spendingCount = purchases.length;
       vm.spendingLabel = vm.spendingPeriod === 'all' ? 'All time' : vm.spendingPeriod === 'year' ? vm.spendingYear : vm.months[Number(vm.spendingMonth) - 1].name + ' ' + vm.spendingYear;
       vm.spendingCategories = Array.from(totals, function (entry) {
-        var index = vm.categories.indexOf(entry[0]);
+        var index = defaultCategories.indexOf(entry[0]);
         var color = categoryColors[index];
         if (!color) {
           var hash = 0;
@@ -165,8 +167,26 @@
       vm.balanceForm = { week: new Date(), balance: account.latest_balance === null ? null : Number(account.latest_balance) };
     };
     vm.openAccount = function () { vm.error = ''; vm.accountForm = { name: '', type: 'Checking', color: '#8676f7', file: null }; vm.modal = 'account'; };
-    vm.openPurchase = function () { vm.error = ''; vm.purchaseForm = { merchant: '', amount: null, purchase_date: new Date(), category: 'Food & Drink', account_id: null, note: '' }; vm.modal = 'purchase'; };
-    vm.closeModal = function () { if (!vm.saving) vm.modal = null; };
+    vm.openPurchase = function () { vm.error = ''; vm.cancelCategory(); vm.purchaseForm = { merchant: '', amount: null, purchase_date: new Date(), category: 'Food & Drink', account_id: null, note: '' }; vm.modal = 'purchase'; };
+    vm.closeModal = function () { if (!vm.saving && !vm.categorySaving) vm.modal = null; };
+    vm.cancelCategory = function () { vm.creatingCategory = false; vm.categoryName = ''; vm.categoryError = ''; };
+    vm.createCategory = function () {
+      if (vm.categorySaving || vm.saving) return;
+      var name = (vm.categoryName || '').trim();
+      vm.categoryError = '';
+      if (!name || name.length > 60) { vm.categoryError = 'Enter a category name (up to 60 characters).'; return; }
+      vm.categorySaving = true;
+      return $http.post('/api/categories', { name: name }).then(function (response) {
+        var savedName = response.data.name;
+        if (vm.categories.indexOf(savedName) === -1) vm.categories.push(savedName);
+        vm.categories.sort(function (a, b) { return a.localeCompare(b); });
+        vm.purchaseForm.category = savedName;
+        vm.cancelCategory();
+        showNotice('Category created and selected.');
+      }).catch(function (error) {
+        vm.categoryError = error && error.data && error.data.error ? error.data.error : 'Could not create the category. Please try again.';
+      }).finally(function () { vm.categorySaving = false; });
+    };
     vm.saveAccount = function () {
       vm.saving = true; vm.error = '';
       var data = new FormData();
@@ -185,6 +205,7 @@
       $http.post('/api/accounts/' + vm.selectedAccountId + '/balances', { week: localDate(vm.balanceForm.week), balance: vm.balanceForm.balance }).then(function () { showNotice('Weekly balance saved.'); return refresh(); }).catch(showError).finally(function () { vm.saving = false; });
     };
     vm.savePurchase = function () {
+      if (vm.saving || vm.categorySaving || vm.creatingCategory) return;
       vm.saving = true; vm.error = '';
       var form = angular.copy(vm.purchaseForm);
       form.purchase_date = localDate(vm.purchaseForm.purchase_date);

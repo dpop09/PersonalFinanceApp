@@ -28,4 +28,8 @@ Dates may be Excel dates or `YYYY-MM-DD` text. Each date is assigned to its Mond
 
 ## Data
 
+In **Add purchase**, choose **New category** below the category selector to create a reusable category. Creating it selects it for the current purchase. Category names must be unique and contain 1–60 characters. Custom categories appear in spending charts once purchases use them, including month, year, and all-time views.
+
+Restart the app after updating to initialize category storage. Existing purchase categories are added automatically, and saved categories remain available even if their purchases are deleted.
+
 The server creates the database and tables automatically. To back up your data, use `mysqldump personal_finance` (with your MySQL credentials). Deleting the app folder does not delete the MySQL database.
