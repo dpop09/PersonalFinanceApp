@@ -1,0 +1,131 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+
+async function setup(purchases) {
+  let controller;
+  let onDestroy;
+  let rows = purchases;
+  const pending = [];
+  const charts = [];
+  const module = { filter() {}, directive() {}, controller(_name, callback) { controller = callback; } };
+  function Chart(canvas, config) {
+    this.canvas = canvas;
+    this.config = config;
+    this.destroyed = false;
+    this.destroy = () => { this.destroyed = true; };
+    charts.push(this);
+  }
+  const context = { angular: { module: () => module, copy: value => ({ ...value }) }, window: { Chart, confirm: () => true }, Chart, document: { getElementById: id => ({ id }) }, Intl };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../public/app.js'), 'utf8'), context);
+  const timeout = (callback, delay) => { if (!delay) pending.push(callback); };
+  timeout.cancel = () => {};
+  const http = {
+    get: url => Promise.resolve({ data: url === '/api/purchases' ? rows : [] }),
+    post: (_url, purchase) => { rows = [...rows, { ...purchase, id: rows.length + 1 }]; return Promise.resolve({ data: {} }); },
+    delete: url => { rows = rows.filter(row => row.id !== Number(url.split('/').pop())); return Promise.resolve(); }
+  };
+  const state = {};
+  controller.call(state, http, timeout, { $on: (_event, callback) => { onDestroy = callback; } });
+  async function flush() {
+    await new Promise(resolve => setImmediate(resolve));
+    while (pending.length) pending.shift()();
+  }
+  await flush();
+  return { state, charts, flush, destroy: () => onDestroy() };
+}
+
+const purchases = [
+  { id: 1, purchase_date: '2023-12-31', category: 'Travel', amount: '80.00' },
+  { id: 2, purchase_date: '2024-01-01', category: 'Groceries', amount: '10.10' },
+  { id: 3, purchase_date: '2024-01-31', category: 'Groceries', amount: '20.20' },
+  { id: 4, purchase_date: '2024-01-15', category: 'Shopping', amount: '70.70' },
+  { id: 5, purchase_date: '2024-02-29', category: 'Travel', amount: '49.00' },
+  { id: 6, purchase_date: '2025-01-01', category: 'Shopping', amount: '50.00' }
+];
+
+test('spending groups decimal amounts and filters month, year, and all time by purchase date', async () => {
+  const { state, charts, flush } = await setup(purchases);
+  state.spendingYear = '2024';
+  state.spendingMonth = '01';
+  state.setPage('spending');
+  await flush();
+  assert.equal(state.spendingTotal, 101);
+  assert.equal(state.spendingCount, 3);
+  assert.equal(state.spendingLabel, 'January 2024');
+  assert.equal(state.spendingCategories[0].name, 'Shopping');
+  assert.equal(state.spendingCategories[0].percentage, 70);
+  assert.equal(state.spendingCategories[1].amount, 30.3);
+  assert.equal(state.spendingCategories[1].percentage, 30);
+  const color = state.spendingCategories[0].color;
+  const config = charts.at(-1).config;
+  assert.equal(config.type, 'pie');
+  assert.equal(config.options.plugins.tooltip.callbacks.label({ dataIndex: 0 }), 'Shopping: $70.70 (70.0%)');
+
+  state.spendingPeriod = 'year';
+  state.updateSpending();
+  await flush();
+  assert.equal(state.spendingTotal, 150);
+  assert.equal(state.spendingCount, 4);
+  assert.equal(state.spendingLabel, '2024');
+
+  state.spendingPeriod = 'all';
+  state.updateSpending();
+  await flush();
+  assert.equal(state.spendingTotal, 280);
+  assert.equal(state.spendingCount, 6);
+  assert.equal(state.spendingCategories.find(row => row.name === 'Shopping').color, color);
+  for (const year of ['2023', '2024', '2025']) assert.ok(state.spendingYears.includes(year));
+});
+
+test('empty periods remove the old chart; single categories, navigation, and teardown work', async () => {
+  const { state, charts, flush, destroy } = await setup(purchases);
+  state.spendingYear = '2024';
+  state.spendingMonth = '02';
+  state.setPage('spending');
+  await flush();
+  assert.equal(state.spendingCategories[0].percentage, 100);
+  const firstChart = charts.at(-1);
+  state.spendingMonth = '03';
+  state.updateSpending();
+  await flush();
+  assert.equal(firstChart.destroyed, true);
+  assert.equal(state.spendingTotal, 0);
+  assert.equal(state.spendingCategories.length, 0);
+  assert.equal(charts.length, 1);
+
+  state.spendingMonth = '02';
+  state.updateSpending();
+  await flush();
+  state.setPage('overview');
+  assert.equal(charts.at(-1).destroyed, true);
+  await flush();
+  state.setPage('spending');
+  await flush();
+  assert.equal(charts.at(-1).destroyed, false);
+  destroy();
+  assert.equal(charts.at(-1).destroyed, true);
+});
+
+test('saving and deleting purchases refresh the active breakdown, including custom categories', async () => {
+  const { state, charts, flush } = await setup([]);
+  state.spendingPeriod = 'all';
+  state.setPage('spending');
+  await flush();
+  assert.equal(charts.length, 0);
+  state.purchaseForm = { merchant: 'Shop', purchase_date: new Date(2024, 0, 1), category: '__proto__', amount: 0.1 };
+  state.savePurchase();
+  await flush();
+  assert.equal(state.spendingTotal, 0.1);
+  assert.equal(state.spendingCount, 1);
+  assert.equal(state.spendingCategories[0].name, '__proto__');
+  assert.equal(state.spendingCategories[0].percentage, 100);
+  assert.ok(state.spendingCategories[0].color);
+  state.deletePurchase(state.purchases[0]);
+  await flush();
+  assert.equal(state.spendingTotal, 0);
+  assert.equal(state.spendingCount, 0);
+  assert.equal(charts.at(-1).destroyed, true);
+});

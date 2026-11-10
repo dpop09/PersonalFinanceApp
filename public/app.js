@@ -15,6 +15,7 @@
   app.controller('FinanceController', function ($http, $timeout, $scope) {
     var vm = this;
     var chart;
+    var spendingChart;
     var noticeTimer;
     vm.page = 'overview';
     vm.pageLabel = 'Overview';
@@ -27,6 +28,13 @@
     vm.allTimeSpending = 0;
     vm.accountTypes = ['Checking', 'Savings', 'Credit', 'Investment', 'Cash', 'Other'];
     vm.categories = ['Food & Drink', 'Groceries', 'Shopping', 'Transport', 'Bills & Utilities', 'Housing', 'Health', 'Entertainment', 'Travel', 'Education', 'Other'];
+    vm.spendingPeriod = 'month';
+    vm.spendingYear = String(new Date().getFullYear());
+    vm.spendingMonth = String(new Date().getMonth() + 1).padStart(2, '0');
+    vm.months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map(function (name, index) {
+      return { name: name, value: String(index + 1).padStart(2, '0') };
+    });
+    var categoryColors = ['#8676f7', '#37b99a', '#56a5ed', '#e7ae51', '#f38573', '#6e7f9c', '#c868ab', '#57944a', '#b98246', '#4d789d', '#9593a5'];
     vm.colors = [
       { name: 'Violet', value: '#8676f7' }, { name: 'Blue', value: '#56a5ed' },
       { name: 'Mint', value: '#37b99a' }, { name: 'Coral', value: '#f38573' },
@@ -48,6 +56,7 @@
         vm.accounts = results[0].data;
         vm.balances = results[1].data;
         vm.purchases = results[2].data;
+        vm.updateSpending();
         vm.totalBalance = vm.accounts.reduce(function (sum, item) { return sum + Number(item.latest_balance || 0); }, 0);
         vm.allTimeSpending = vm.purchases.reduce(function (sum, item) { return sum + Number(item.amount); }, 0);
         var month = localDate(new Date()).slice(0, 7);
@@ -85,11 +94,68 @@
         options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (context) { return context.dataset.label + ': ' + new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(context.parsed.y); } } } }, scales: { x: { grid: { display: false }, ticks: { color: '#9197a8', maxTicksLimit: 7 } }, y: { grid: { color: '#eef0f6' }, ticks: { color: '#9197a8', callback: function (value) { return '$' + Number(value).toLocaleString(); } } } } }
       });
     }
+    vm.updateSpending = function () {
+      var years = new Set([String(new Date().getFullYear()), vm.spendingYear]);
+      vm.purchases.forEach(function (purchase) { years.add(purchase.purchase_date.slice(0, 4)); });
+      vm.spendingYears = Array.from(years).sort().reverse();
+      var prefix = vm.spendingYear + (vm.spendingPeriod === 'month' ? '-' + vm.spendingMonth : '');
+      var purchases = vm.purchases.filter(function (purchase) {
+        return vm.spendingPeriod === 'all' || purchase.purchase_date.indexOf(prefix) === 0;
+      });
+      var totals = new Map();
+      var totalCents = 0;
+      purchases.forEach(function (purchase) {
+        var cents = Math.round(Number(purchase.amount) * 100);
+        totals.set(purchase.category, (totals.get(purchase.category) || 0) + cents);
+        totalCents += cents;
+      });
+      vm.spendingTotal = totalCents / 100;
+      vm.spendingCount = purchases.length;
+      vm.spendingLabel = vm.spendingPeriod === 'all' ? 'All time' : vm.spendingPeriod === 'year' ? vm.spendingYear : vm.months[Number(vm.spendingMonth) - 1].name + ' ' + vm.spendingYear;
+      vm.spendingCategories = Array.from(totals, function (entry) {
+        var index = vm.categories.indexOf(entry[0]);
+        var color = categoryColors[index];
+        if (!color) {
+          var hash = 0;
+          for (var i = 0; i < entry[0].length; i++) hash = (hash * 31 + entry[0].charCodeAt(i)) >>> 0;
+          color = 'hsl(' + (hash % 360) + ', 55%, 55%)';
+        }
+        return { name: entry[0], amount: entry[1] / 100, percentage: totalCents ? entry[1] / totalCents * 100 : 0, color: color };
+      }).sort(function (a, b) { return b.amount - a.amount || a.name.localeCompare(b.name); });
+      $timeout(drawSpendingChart, 0);
+    };
+    function drawSpendingChart() {
+      if (spendingChart) { spendingChart.destroy(); spendingChart = null; }
+      if (vm.page !== 'spending' || !vm.spendingCategories.length) return;
+      var canvas = document.getElementById('spendingChart');
+      if (!canvas || !window.Chart) return;
+      var categories = vm.spendingCategories;
+      spendingChart = new Chart(canvas, {
+        type: 'pie',
+        data: {
+          labels: categories.map(function (category) { return category.name; }),
+          datasets: [{ data: categories.map(function (category) { return category.amount; }), backgroundColor: categories.map(function (category) { return category.color; }), borderColor: '#fff', borderWidth: 3, hoverOffset: 8 }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false, layout: { padding: 12 },
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: function (context) {
+              var category = categories[context.dataIndex];
+              return category.name + ': ' + new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(category.amount) + ' (' + category.percentage.toFixed(1) + '%)';
+            } } }
+          }
+        }
+      });
+    }
     vm.setPage = function (page) {
+      if (chart) { chart.destroy(); chart = null; }
+      if (spendingChart) { spendingChart.destroy(); spendingChart = null; }
       vm.page = page;
       vm.pageLabel = page.charAt(0).toUpperCase() + page.slice(1);
       vm.error = '';
       if (page === 'accounts' && !vm.selectedAccountId && vm.accounts.length) vm.selectAccount(vm.accounts[0]);
+      if (page === 'spending') vm.updateSpending();
       $timeout(drawChart, 0);
     };
     vm.selectAccount = function (account) {
@@ -129,7 +195,7 @@
       vm.error = '';
       $http.delete('/api/purchases/' + purchase.id).then(function () { showNotice('Purchase deleted.'); return refresh(); }).catch(showError);
     };
-    $scope.$on('$destroy', function () { if (chart) chart.destroy(); });
+    $scope.$on('$destroy', function () { if (chart) chart.destroy(); if (spendingChart) spendingChart.destroy(); });
     refresh();
   });
 }());

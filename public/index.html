@@ -15,6 +15,7 @@
         <button ng-class="{active: vm.page === 'overview'}" ng-click="vm.setPage('overview')"><span class="nav-icon">▦</span> Overview</button>
         <button ng-class="{active: vm.page === 'accounts'}" ng-click="vm.setPage('accounts')"><span class="nav-icon">▣</span> Accounts</button>
         <button ng-class="{active: vm.page === 'purchases'}" ng-click="vm.setPage('purchases')"><span class="nav-icon">≡</span> Purchases</button>
+        <button ng-class="{active: vm.page === 'spending'}" ng-click="vm.setPage('spending')" aria-label="Spending" title="Spending"><span class="nav-icon" aria-hidden="true">◕</span> Spending</button>
       </nav>
       <div class="sidebar-bottom">
         <div class="privacy-card"><span class="privacy-icon">✦</span><strong>Your space, your numbers.</strong><p>Everything you enter stays in your local MySQL database.</p></div>
@@ -47,6 +48,32 @@
           <div class="account-grid" ng-if="vm.accounts.length"><button class="account-card" ng-repeat="account in vm.accounts" ng-class="{selected: vm.selectedAccountId === account.id}" ng-click="vm.selectAccount(account)"><span class="account-card-top"><span class="account-symbol large" ng-style="{'background-color': account.color}">{{account.name | initial}}</span><span class="account-type">{{account.type}}</span></span><span class="account-card-name">{{account.name}}</span><span class="account-card-balance">{{account.latest_balance === null ? 'No balance yet' : (account.latest_balance | currency)}}</span><span class="account-card-date">{{account.latest_week ? ('As of ' + (account.latest_week | prettyDate)) : 'Add your first weekly balance'}}</span></button></div>
           <div class="page-empty" ng-if="!vm.accounts.length"><div class="empty-icon">▣</div><h2>No accounts yet</h2><p>Start by adding an account. You can import weekly balances from an Excel file or enter them by hand.</p><button class="button button-primary" ng-click="vm.openAccount()">Add your first account</button></div>
           <div class="panel balance-panel" ng-if="vm.selectedAccount"><div class="panel-header"><div><div class="eyebrow">WEEKLY SNAPSHOTS</div><h2>{{vm.selectedAccount.name}} balance history</h2><p>Record your account balance for any week. Saving the same week updates it.</p></div></div><form class="balance-form" ng-submit="vm.saveBalance()"><label>Week of <input type="date" ng-model="vm.balanceForm.week" required></label><label>Balance <div class="input-prefix"><span>$</span><input type="number" step="0.01" ng-model="vm.balanceForm.balance" placeholder="0.00" required></div></label><button class="button button-primary" type="submit" ng-disabled="vm.saving">Save balance</button></form><div class="table-scroll" ng-if="vm.selectedBalances.length"><table><thead><tr><th>Week starting</th><th class="amount-cell">Balance</th></tr></thead><tbody><tr ng-repeat="row in vm.selectedBalances"><td>{{row.week_start | prettyDate}}</td><td class="amount-cell"><strong>{{row.balance | currency}}</strong></td></tr></tbody></table></div><div class="small-empty" ng-if="!vm.selectedBalances.length">No weekly balances for this account yet.</div></div>
+        </section>
+
+        <section class="spending-page" ng-if="vm.page === 'spending'">
+          <div class="page-heading"><div><div class="eyebrow">WHERE YOUR MONEY GOES</div><h1>Spending</h1><p>See each category's share of your purchase spending.</p></div><button class="button button-primary" ng-click="vm.openPurchase()"><span>＋</span> Add purchase</button></div>
+          <div class="spending-filters">
+            <div class="period-switch" role="group" aria-label="Spending period">
+              <button ng-class="{active: vm.spendingPeriod === 'month'}" ng-attr-aria-pressed="{{vm.spendingPeriod === 'month'}}" ng-click="vm.spendingPeriod = 'month'; vm.updateSpending()">Month</button>
+              <button ng-class="{active: vm.spendingPeriod === 'year'}" ng-attr-aria-pressed="{{vm.spendingPeriod === 'year'}}" ng-click="vm.spendingPeriod = 'year'; vm.updateSpending()">Year</button>
+              <button ng-class="{active: vm.spendingPeriod === 'all'}" ng-attr-aria-pressed="{{vm.spendingPeriod === 'all'}}" ng-click="vm.spendingPeriod = 'all'; vm.updateSpending()">All time</button>
+            </div>
+            <label ng-if="vm.spendingPeriod === 'month'">Month<select ng-model="vm.spendingMonth" ng-options="month.value as month.name for month in vm.months" ng-change="vm.updateSpending()"></select></label>
+            <label ng-if="vm.spendingPeriod !== 'all'">Year<select ng-model="vm.spendingYear" ng-options="year for year in vm.spendingYears" ng-change="vm.updateSpending()"></select></label>
+          </div>
+          <div class="purchase-summary" aria-live="polite">
+            <div><span>{{vm.spendingLabel}} spending</span><strong>{{vm.spendingTotal | currency}}</strong></div>
+            <div><span>Purchases in this period</span><strong>{{vm.spendingCount}}</strong></div>
+            <div><span>Categories in this period</span><strong>{{vm.spendingCategories.length}}</strong></div>
+          </div>
+          <div class="panel spending-panel">
+            <div class="panel-header"><div><div class="eyebrow">SPENDING BREAKDOWN</div><h2>Purchases by category</h2><p>Percentages are based on the amount spent, across all accounts.</p></div><span class="panel-badge">{{vm.spendingLabel}}</span></div>
+            <div class="spending-breakdown" ng-if="vm.spendingCategories.length">
+              <div class="spending-chart"><canvas id="spendingChart" role="img" ng-attr-aria-label="{{'Purchase spending by category for ' + vm.spendingLabel + '. Amounts and percentages are listed in the adjacent table.'}}"></canvas></div>
+              <div class="table-scroll"><table class="category-table"><caption class="sr-only">Category amounts and shares of spending for {{vm.spendingLabel}}</caption><thead><tr><th scope="col">Category</th><th scope="col" class="amount-cell">Amount</th><th scope="col" class="amount-cell">Share</th></tr></thead><tbody><tr ng-repeat="category in vm.spendingCategories track by category.name"><td><span class="category-name"><i ng-style="{'background-color': category.color}" aria-hidden="true"></i><strong>{{category.name}}</strong></span></td><td class="amount-cell">{{category.amount | currency}}</td><td class="amount-cell"><strong>{{category.percentage | number:1}}%</strong></td></tr></tbody></table></div>
+            </div>
+            <div class="empty-chart" ng-if="!vm.spendingCategories.length"><div class="empty-icon" aria-hidden="true">◕</div><h3>No purchases for {{vm.spendingLabel}}</h3><p>Choose another period or add a purchase to see your category breakdown.</p><button class="button button-primary" ng-click="vm.openPurchase()">Add purchase</button></div>
+          </div>
         </section>
 
         <section ng-if="vm.page === 'purchases'">
