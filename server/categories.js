@@ -12,4 +12,4 @@ async function initializeCategories(pool) {
   await pool.query('INSERT IGNORE INTO purchase_categories (name) SELECT DISTINCT category FROM purchases');
 }
 
-module.exports = { initializeCategories };
+module.exports = { initializeCategories, defaultCategories };

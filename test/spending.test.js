@@ -33,7 +33,22 @@ async function setup(purchases, categories = ['Food & Drink', 'Groceries', 'Shop
       rows = [...rows, { ...purchase, id: rows.length + 1 }];
       return Promise.resolve({ data: {} });
     },
-    delete: url => { rows = rows.filter(row => row.id !== Number(url.split('/').pop())); return Promise.resolve(); }
+    patch: (url, body) => {
+      const previousName = decodeURIComponent(url.split('/').pop());
+      if (categories.includes(body.name) && body.name !== previousName) return Promise.reject({ data: { error: 'A category with this name already exists.' } });
+      categories.splice(categories.indexOf(previousName), 1, body.name);
+      rows = rows.map(row => row.category === previousName ? { ...row, category: body.name } : row);
+      return Promise.resolve({ data: { previousName, name: body.name, deleted: false } });
+    },
+    delete: url => {
+      if (url.startsWith('/api/categories/')) {
+        const previousName = decodeURIComponent(url.split('/').pop());
+        categories.splice(categories.indexOf(previousName), 1);
+        rows = rows.map(row => row.category === previousName ? { ...row, category: 'Other' } : row);
+        return Promise.resolve({ data: { previousName, name: 'Other', deleted: true } });
+      }
+      rows = rows.filter(row => row.id !== Number(url.split('/').pop())); return Promise.resolve();
+    }
   };
   const state = {};
   controller.call(state, http, timeout, { $on: (_event, callback) => { onDestroy = callback; } });
@@ -42,7 +57,7 @@ async function setup(purchases, categories = ['Food & Drink', 'Groceries', 'Shop
     while (pending.length) pending.shift()();
   }
   await flush();
-  return { state, charts, flush, destroy: () => onDestroy() };
+  return { state, charts, flush, window: context.window, destroy: () => onDestroy() };
 }
 
 const purchases = [
@@ -200,4 +215,56 @@ test('category errors preserve the purchase draft and cancellation restores purc
   state.cancelCategory();
   assert.equal(state.creatingCategory, false);
   assert.equal(state.categoryError, '');
+});
+
+test('category management updates purchases, draft selection, and chart percentages across periods', async () => {
+  const { state, charts, flush, window } = await setup([
+    { id: 1, category: 'Pet / care', amount: 25, purchase_date: '2024-01-01' },
+    { id: 2, category: 'Pet / care', amount: 50, purchase_date: '2025-01-01' },
+    { id: 3, category: 'Other', amount: 75, purchase_date: '2024-01-01' }
+  ], ['Food & Drink', 'Other', 'Pet / care']);
+  state.spendingPeriod = 'all';
+  state.setPage('spending');
+  state.openPurchase();
+  state.purchaseForm.category = 'Pet / care';
+  state.purchaseForm.merchant = 'Draft purchase';
+  state.openCategories();
+  assert.equal(state.customCategories.length, 1);
+  state.editCategory('Pet / care');
+  state.categoryEdit.name = 'Other';
+  await state.renameCategory();
+  assert.match(state.error, /already exists/);
+  assert.equal(state.purchaseForm.category, 'Pet / care');
+  state.categoryEdit.name = 'Animals';
+  await state.renameCategory();
+  await flush();
+  assert.equal(state.purchaseForm.category, 'Animals');
+  assert.equal(state.purchases[0].category, 'Animals');
+  assert.equal(state.purchases[1].category, 'Animals');
+  assert.equal(state.spendingCategories.find(row => row.name === 'Animals').percentage, 50);
+  assert.ok(charts.at(-1).config.data.labels.includes('Animals'));
+  window.confirm = () => false;
+  state.deleteCategory('Animals');
+  assert.ok(state.categories.includes('Animals'));
+  window.confirm = () => true;
+  await state.deleteCategory('Animals');
+  await flush();
+  assert.equal(state.purchaseForm.category, 'Other');
+  assert.equal(state.purchases.length, 3);
+  assert.equal(state.spendingTotal, 150);
+  assert.equal(state.customCategories.length, 0);
+  state.spendingYear = '2024';
+  state.spendingMonth = '01';
+  for (const period of ['month', 'year', 'all']) {
+    state.spendingPeriod = period;
+    state.updateSpending();
+    await flush();
+    assert.equal(state.spendingCategories.length, 1);
+    assert.equal(state.spendingCategories[0].name, 'Other');
+    assert.equal(state.spendingCategories[0].percentage, 100);
+    assert.equal(state.spendingTotal, period === 'all' ? 150 : 100);
+  }
+  state.closeModal();
+  assert.equal(state.modal, 'purchase');
+  assert.equal(state.purchaseForm.merchant, 'Draft purchase');
 });

@@ -23,3 +23,13 @@
 .category-editor p{font-size:12px;line-height:1.5;color:#687083;margin:10px 0}
 .category-editor .category-error{color:#a74949}
 .category-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.heading-actions{display:flex;flex-wrap:wrap;gap:10px}
+.purchase-category .manage-category-link{display:block}
+.category-manager>p{margin:0;color:#687083;font-size:12px;line-height:1.6}
+.managed-category{border:1px solid #e4e7ef;border-radius:10px;padding:14px}
+.managed-category-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.managed-category-row>strong{font-size:13px;overflow-wrap:anywhere;min-width:0}
+.managed-category-row .category-actions{margin:0;flex-shrink:0}
+.button-danger{background:#fff0ee;color:#a74949}
+.button-danger:hover{background:#ffe3df}
+@media(max-width:760px){.managed-category-row{align-items:flex-start;flex-direction:column}}

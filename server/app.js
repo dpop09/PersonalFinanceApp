@@ -3,6 +3,7 @@ const express = require('express');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const { getPool } = require('./db');
+const { defaultCategories } = require('./categories');
 const { mondayOf, parseMoney, parseBalanceWorkbook } = require('./import');
 
 const app = express();
@@ -115,6 +116,39 @@ app.post('/api/categories', asyncRoute(async (req, res) => {
   res.status(201).json({ name });
 }));
 
+async function changeCategory(req, res, newName) {
+  const connection = await getPool().getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.execute('SELECT name FROM purchase_categories WHERE name = ? FOR UPDATE', [req.params.name]);
+    if (!rows.length || defaultCategories.includes(rows[0].name)) {
+      await connection.rollback();
+      return fail(res, rows.length ? 400 : 404, rows.length ? 'Built-in categories cannot be renamed or deleted.' : 'Category not found.');
+    }
+    const previousName = rows[0].name;
+    if (newName !== null) {
+      await connection.execute('UPDATE purchase_categories SET name = ? WHERE name = ?', [newName, previousName]);
+    }
+    const replacement = newName === null ? 'Other' : newName;
+    const [result] = await connection.execute('UPDATE purchases SET category = ? WHERE category = ?', [replacement, previousName]);
+    if (newName === null) await connection.execute('DELETE FROM purchase_categories WHERE name = ?', [previousName]);
+    await connection.commit();
+    res.json({ previousName, name: replacement, deleted: newName === null, updatedPurchases: result.affectedRows });
+  } catch (error) {
+    await connection.rollback();
+    if (error.code === 'ER_DUP_ENTRY') return fail(res, 409, 'A category with this name already exists.');
+    throw error;
+  } finally { connection.release(); }
+}
+
+app.patch('/api/categories/:name', asyncRoute(async (req, res) => {
+  const name = cleanString(req.body?.name, 60);
+  if (!name || name.length > 60) return fail(res, 400, 'Enter a category name (up to 60 characters).');
+  return changeCategory(req, res, name);
+}));
+
+app.delete('/api/categories/:name', asyncRoute((req, res) => changeCategory(req, res, null)));
+
 app.get('/api/purchases', asyncRoute(async (_req, res) => {
   const [rows] = await getPool().query(`SELECT p.id, p.account_id, p.purchase_date, p.merchant, p.category, p.amount, p.note, a.name AS account_name
     FROM purchases p LEFT JOIN accounts a ON a.id = p.account_id ORDER BY p.purchase_date DESC, p.id DESC`);
@@ -136,11 +170,23 @@ app.post('/api/purchases', asyncRoute(async (req, res) => {
     const [accounts] = await getPool().execute('SELECT id FROM accounts WHERE id = ?', [accountId]);
     if (!accounts.length) return fail(res, 400, 'Choose an existing account.');
   }
-  const [categories] = await getPool().execute('SELECT name FROM purchase_categories WHERE name = ?', [category]);
-  if (!categories.length) return fail(res, 400, 'Choose an existing category or create a new one.');
-  const [result] = await getPool().execute(`INSERT INTO purchases (account_id, purchase_date, merchant, category, amount, note)
-    VALUES (?, ?, ?, ?, ?, ?)`, [accountId, date, merchant, categories[0].name, amount, note || null]);
-  res.status(201).json({ id: result.insertId });
+  const connection = await getPool().getConnection();
+  try {
+    await connection.beginTransaction();
+    // Hold the category until the purchase is saved so a concurrent rename or deletion cannot leave a stale name.
+    const [categories] = await connection.execute('SELECT name FROM purchase_categories WHERE name = ? FOR SHARE', [category]);
+    if (!categories.length) {
+      await connection.rollback();
+      return fail(res, 400, 'Choose an existing category or create a new one.');
+    }
+    const [result] = await connection.execute(`INSERT INTO purchases (account_id, purchase_date, merchant, category, amount, note)
+      VALUES (?, ?, ?, ?, ?, ?)`, [accountId, date, merchant, categories[0].name, amount, note || null]);
+    await connection.commit();
+    res.status(201).json({ id: result.insertId });
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally { connection.release(); }
 }));
 
 app.delete('/api/purchases/:id', asyncRoute(async (req, res) => {

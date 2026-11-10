@@ -29,6 +29,7 @@
     vm.accountTypes = ['Checking', 'Savings', 'Credit', 'Investment', 'Cash', 'Other'];
     vm.categories = ['Food & Drink', 'Groceries', 'Shopping', 'Transport', 'Bills & Utilities', 'Housing', 'Health', 'Entertainment', 'Travel', 'Education', 'Other'];
     var defaultCategories = vm.categories.slice();
+    vm.customCategories = [];
     vm.spendingPeriod = 'month';
     vm.spendingYear = String(new Date().getFullYear());
     vm.spendingMonth = String(new Date().getMonth() + 1).padStart(2, '0');
@@ -58,6 +59,7 @@
         vm.balances = results[1].data;
         vm.purchases = results[2].data;
         vm.categories = results[3].data;
+        updateCustomCategories();
         vm.updateSpending();
         vm.totalBalance = vm.accounts.reduce(function (sum, item) { return sum + Number(item.latest_balance || 0); }, 0);
         vm.allTimeSpending = vm.purchases.reduce(function (sum, item) { return sum + Number(item.amount); }, 0);
@@ -168,7 +170,51 @@
     };
     vm.openAccount = function () { vm.error = ''; vm.accountForm = { name: '', type: 'Checking', color: '#8676f7', file: null }; vm.modal = 'account'; };
     vm.openPurchase = function () { vm.error = ''; vm.cancelCategory(); vm.purchaseForm = { merchant: '', amount: null, purchase_date: new Date(), category: 'Food & Drink', account_id: null, note: '' }; vm.modal = 'purchase'; };
-    vm.closeModal = function () { if (!vm.saving && !vm.categorySaving) vm.modal = null; };
+    vm.closeModal = function () {
+      if (vm.saving || vm.categorySaving) return;
+      vm.error = '';
+      vm.modal = vm.modal === 'categories' ? vm.categoryReturnModal : null;
+      vm.categoryReturnModal = null;
+    };
+    function updateCustomCategories() {
+      vm.customCategories = vm.categories.filter(function (name) { return defaultCategories.indexOf(name) === -1; });
+    }
+    vm.openCategories = function () {
+      if (vm.saving || vm.categorySaving) return;
+      vm.categoryReturnModal = vm.modal === 'purchase' ? 'purchase' : null;
+      vm.categoryEdit = null;
+      vm.error = '';
+      vm.modal = 'categories';
+    };
+    vm.editCategory = function (name) { vm.error = ''; vm.categoryEdit = { original: name, name: name }; };
+    function applyCategoryChange(response) {
+      var change = response.data;
+      vm.categories = vm.categories.filter(function (name) { return name !== change.previousName; });
+      if (vm.categories.indexOf(change.name) === -1) vm.categories.push(change.name);
+      vm.categories.sort(function (a, b) { return a.localeCompare(b); });
+      vm.purchases.forEach(function (purchase) { if (purchase.category === change.previousName) purchase.category = change.name; });
+      if (vm.purchaseForm && vm.purchaseForm.category === change.previousName) vm.purchaseForm.category = change.name;
+      updateCustomCategories();
+      vm.categoryEdit = null;
+      vm.updateSpending();
+      showNotice(change.deleted ? 'Category deleted. Its purchases are now in Other.' : 'Category renamed. Existing purchases have been updated.');
+      return refresh();
+    }
+    vm.renameCategory = function () {
+      if (vm.categorySaving || !vm.categoryEdit) return;
+      var name = (vm.categoryEdit.name || '').trim();
+      vm.error = '';
+      if (!name || name.length > 60) { vm.error = 'Enter a category name (up to 60 characters).'; return; }
+      vm.categorySaving = true;
+      return $http.patch('/api/categories/' + encodeURIComponent(vm.categoryEdit.original), { name: name }).then(applyCategoryChange).catch(showError).finally(function () { vm.categorySaving = false; });
+    };
+    vm.deleteCategory = function (name) {
+      if (vm.categorySaving) return;
+      if (!window.confirm('Delete the category "' + name + '"? All of its purchases will move to Other. No purchases or spending amounts will be deleted.')) return;
+      vm.error = '';
+      vm.categorySaving = true;
+      return $http.delete('/api/categories/' + encodeURIComponent(name)).then(applyCategoryChange).catch(showError).finally(function () { vm.categorySaving = false; });
+    };
     vm.cancelCategory = function () { vm.creatingCategory = false; vm.categoryName = ''; vm.categoryError = ''; };
     vm.createCategory = function () {
       if (vm.categorySaving || vm.saving) return;
@@ -180,6 +226,7 @@
         var savedName = response.data.name;
         if (vm.categories.indexOf(savedName) === -1) vm.categories.push(savedName);
         vm.categories.sort(function (a, b) { return a.localeCompare(b); });
+        updateCustomCategories();
         vm.purchaseForm.category = savedName;
         vm.cancelCategory();
         showNotice('Category created and selected.');
