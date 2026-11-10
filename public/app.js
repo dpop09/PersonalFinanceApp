@@ -169,11 +169,25 @@
       vm.balanceForm = { week: new Date(), balance: account.latest_balance === null ? null : Number(account.latest_balance) };
     };
     vm.openAccount = function () { vm.error = ''; vm.accountForm = { name: '', type: 'Checking', color: '#8676f7', file: null }; vm.modal = 'account'; };
-    vm.openPurchase = function () { vm.error = ''; vm.cancelCategory(); vm.purchaseForm = { merchant: '', amount: null, purchase_date: new Date(), category: 'Food & Drink', account_id: null, note: '' }; vm.modal = 'purchase'; };
+    vm.openPurchase = function () { vm.error = ''; vm.editingPurchaseId = null; vm.cancelCategory(); vm.purchaseForm = { merchant: '', amount: null, purchase_date: new Date(), category: 'Food & Drink', account_id: null, note: '' }; vm.modal = 'purchase'; };
+    vm.editPurchase = function (purchase) {
+      if (vm.saving || vm.categorySaving) return;
+      vm.error = '';
+      vm.cancelCategory();
+      vm.editingPurchaseId = purchase.id;
+      var date = purchase.purchase_date.slice(0, 10).split('-').map(Number);
+      vm.purchaseForm = {
+        merchant: purchase.merchant, amount: Number(purchase.amount),
+        purchase_date: new Date(date[0], date[1] - 1, date[2]), category: purchase.category,
+        account_id: purchase.account_id == null ? null : Number(purchase.account_id), note: purchase.note || ''
+      };
+      vm.modal = 'purchase';
+    };
     vm.closeModal = function () {
       if (vm.saving || vm.categorySaving) return;
       vm.error = '';
       vm.modal = vm.modal === 'categories' ? vm.categoryReturnModal : null;
+      if (!vm.modal) vm.editingPurchaseId = null;
       vm.categoryReturnModal = null;
     };
     function updateCustomCategories() {
@@ -256,7 +270,9 @@
       vm.saving = true; vm.error = '';
       var form = angular.copy(vm.purchaseForm);
       form.purchase_date = localDate(vm.purchaseForm.purchase_date);
-      $http.post('/api/purchases', form).then(function () { vm.modal = null; showNotice('Purchase saved.'); return refresh(); }).catch(showError).finally(function () { vm.saving = false; });
+      var editingId = vm.editingPurchaseId;
+      var request = editingId ? $http.put('/api/purchases/' + editingId, form) : $http.post('/api/purchases', form);
+      return request.then(function () { vm.modal = null; vm.editingPurchaseId = null; showNotice(editingId ? 'Purchase updated.' : 'Purchase saved.'); return refresh(); }).catch(showError).finally(function () { vm.saving = false; });
     };
     vm.deletePurchase = function (purchase) {
       if (!window.confirm('Delete this purchase from your history?')) return;

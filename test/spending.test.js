@@ -40,6 +40,12 @@ async function setup(purchases, categories = ['Food & Drink', 'Groceries', 'Shop
       rows = rows.map(row => row.category === previousName ? { ...row, category: body.name } : row);
       return Promise.resolve({ data: { previousName, name: body.name, deleted: false } });
     },
+    put: (url, body) => {
+      const id = Number(url.split('/').pop());
+      if (!rows.some(row => row.id === id)) return Promise.reject({ data: { error: 'Purchase not found.' } });
+      rows = rows.map(row => row.id === id ? { ...row, ...body } : row);
+      return Promise.resolve({ data: { id } });
+    },
     delete: url => {
       if (url.startsWith('/api/categories/')) {
         const previousName = decodeURIComponent(url.split('/').pop());
@@ -57,7 +63,7 @@ async function setup(purchases, categories = ['Food & Drink', 'Groceries', 'Shop
     while (pending.length) pending.shift()();
   }
   await flush();
-  return { state, charts, flush, window: context.window, destroy: () => onDestroy() };
+  return { state, charts, flush, http, window: context.window, destroy: () => onDestroy() };
 }
 
 const purchases = [
@@ -267,4 +273,76 @@ test('category management updates purchases, draft selection, and chart percenta
   state.closeModal();
   assert.equal(state.modal, 'purchase');
   assert.equal(state.purchaseForm.merchant, 'Draft purchase');
+});
+
+test('editing prefills a separate draft, updates totals and chart periods, and never creates another purchase', async () => {
+  const original = { id: 12, merchant: 'Shop', amount: '25.50', purchase_date: '2024-01-31', category: 'Groceries', account_id: 7, note: 'Old note' };
+  const { state, charts, flush } = await setup([original, { id: 13, merchant: 'Lunch', amount: 74.5, purchase_date: '2024-01-01', category: 'Food & Drink' }]);
+  state.editPurchase(original);
+  assert.equal(state.purchaseForm.amount, 25.5);
+  assert.equal(state.purchaseForm.account_id, 7);
+  assert.equal(state.purchaseForm.note, 'Old note');
+  assert.equal(state.purchaseForm.purchase_date.getFullYear(), 2024);
+  assert.equal(state.purchaseForm.purchase_date.getMonth(), 0);
+  assert.equal(state.purchaseForm.purchase_date.getDate(), 31);
+  state.purchaseForm.merchant = 'Cancelled';
+  state.closeModal();
+  assert.equal(original.merchant, 'Shop');
+  assert.equal(state.editingPurchaseId, null);
+
+  state.editPurchase(original);
+  state.openCategories();
+  state.closeModal();
+  assert.equal(state.editingPurchaseId, 12);
+  state.creatingCategory = true;
+  state.categoryName = 'Pet care';
+  await state.createCategory();
+  state.purchaseForm.merchant = 'Vet';
+  state.purchaseForm.amount = 50;
+  state.purchaseForm.purchase_date = new Date(2025, 1, 1);
+  state.purchaseForm.account_id = null;
+  state.purchaseForm.note = '';
+  await state.savePurchase();
+  await flush();
+  assert.equal(state.purchases.length, 2);
+  assert.equal(state.purchases[0].id, 12);
+  assert.equal(state.purchases[0].purchase_date, '2025-02-01');
+  assert.equal(state.purchases[0].category, 'Pet care');
+  assert.equal(state.purchases[0].account_id, null);
+  assert.equal(state.purchases[0].note, '');
+  assert.equal(state.allTimeSpending, 124.5);
+  state.spendingYear = '2024';
+  state.spendingMonth = '01';
+  state.setPage('spending');
+  await flush();
+  assert.equal(state.spendingTotal, 74.5);
+  state.spendingYear = '2025';
+  state.spendingPeriod = 'year';
+  state.updateSpending();
+  await flush();
+  assert.equal(state.spendingTotal, 50);
+  assert.equal(charts.at(-1).config.data.labels[0], 'Pet care');
+  state.openPurchase();
+  assert.equal(state.editingPurchaseId, null);
+  assert.equal(state.purchaseForm.merchant, '');
+});
+
+test('failed purchase edits retain the draft and allow retry', async () => {
+  const { state, http, flush } = await setup([{ id: 1, merchant: 'Shop', amount: 10, purchase_date: '2024-01-01', category: 'Groceries' }]);
+  const put = http.put;
+  http.put = () => Promise.reject({ data: { error: 'Purchase not found.' } });
+  state.editPurchase(state.purchases[0]);
+  state.purchaseForm.merchant = 'New merchant';
+  await state.savePurchase();
+  assert.equal(state.modal, 'purchase');
+  assert.equal(state.editingPurchaseId, 1);
+  assert.equal(state.purchaseForm.merchant, 'New merchant');
+  assert.equal(state.purchases[0].merchant, 'Shop');
+  assert.equal(state.error, 'Purchase not found.');
+  assert.equal(state.saving, false);
+  http.put = put;
+  await state.savePurchase();
+  await flush();
+  assert.equal(state.modal, null);
+  assert.equal(state.purchases[0].merchant, 'New merchant');
 });

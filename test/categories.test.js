@@ -30,6 +30,8 @@ const pool = {
     return [[...categories.values()].sort().map(name => ({ name }))];
   },
   async execute(sql, params) {
+    if (sql.startsWith('SELECT id FROM accounts')) return [params[0] === 7 ? [{ id: 7 }] : []];
+    if (sql.startsWith('SELECT id FROM purchases')) return [purchases[params[0] - 1] ? [{ id: params[0] }] : []];
     if (sql.startsWith('INSERT INTO purchase_categories')) {
       const key = params[0].toLowerCase();
       if (categories.has(key)) throw Object.assign(new Error('Duplicate category'), { code: 'ER_DUP_ENTRY' });
@@ -51,6 +53,13 @@ const pool = {
       categories.delete(previous.toLowerCase());
       categories.set(name.toLowerCase(), name);
       return [{ affectedRows: 1 }];
+    }
+    if (sql.startsWith('UPDATE purchases SET account_id')) {
+      if (failPurchaseUpdate) { failPurchaseUpdate = false; throw new Error('Injected purchase update failure'); }
+      const id = params[6];
+      const changed = JSON.stringify(purchases[id - 1]) !== JSON.stringify(params.slice(0, 6));
+      purchases[id - 1] = params.slice(0, 6);
+      return [{ affectedRows: changed ? 1 : 0 }];
     }
     if (sql.startsWith('UPDATE purchases')) {
       if (failPurchaseUpdate) { failPurchaseUpdate = false; throw new Error('Injected purchase update failure'); }
@@ -95,6 +104,55 @@ test('category API validates, saves, lists, and uses canonical categories for pu
     assert.equal(purchases[0][3], 'Pet care');
     assert.equal((await post('/api/purchases', { ...purchase, category: 'Unknown' })).status, 400);
     assert.equal(purchases.length, 1);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test('purchase editing validates all fields, preserves identity, and rolls back failures', async () => {
+  const server = await new Promise(resolve => {
+    const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
+  });
+  const url = `http://127.0.0.1:${server.address().port}`;
+  purchases.push([7, '2024-01-31', 'Original', 'Groceries', 10, 'Original note']);
+  const id = purchases.length;
+  const count = purchases.length;
+  const update = (purchaseId, body) => fetch(url + '/api/purchases/' + purchaseId, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  });
+  const edited = { merchant: '  Updated shop  ', purchase_date: '2024-02-29', amount: 42.5, category: 'other', account_id: null, note: '  Changed note  ' };
+  try {
+    for (const invalidId of ['0', '-1', 'abc', '1.5']) assert.equal((await update(invalidId, edited)).status, 400);
+    assert.equal((await update(id + 100, edited)).status, 404);
+    for (const fields of [
+      { merchant: '' }, { merchant: 'x'.repeat(121) }, { amount: 0 }, { amount: -10 }, { amount: 'bad' },
+      { purchase_date: '2024-02-30' }, { category: 'Missing' }, { note: 'x'.repeat(501) },
+      { account_id: 999 }, { account_id: 0 }, { account_id: -1 }
+    ]) {
+      assert.equal((await update(id, { ...edited, ...fields })).status, 400, JSON.stringify(fields));
+      assert.equal(purchases[id - 1][2], 'Original');
+    }
+    const response = await update(id, edited);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { id });
+    assert.deepEqual(purchases[id - 1], [null, '2024-02-29', 'Updated shop', 'Other', 42.5, 'Changed note']);
+    assert.equal(purchases.length, count);
+    assert.equal((await update(id, edited)).status, 200, 'Unchanged purchases still save successfully');
+
+    const previous = [...purchases[id - 1]];
+    const originalConsoleError = console.error;
+    console.error = () => {};
+    try {
+      failPurchaseUpdate = true;
+      const rollbackCount = rollbacks;
+      assert.equal((await update(id, { ...edited, amount: 100 })).status, 500);
+      assert.equal(rollbacks, rollbackCount + 1);
+      assert.deepEqual(purchases[id - 1], previous);
+    } finally { console.error = originalConsoleError; }
+    assert.equal((await update(id, { ...edited, account_id: 7, note: '' })).status, 200);
+    assert.equal(purchases[id - 1][0], 7);
+    assert.equal(purchases[id - 1][5], null);
   } finally {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));

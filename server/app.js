@@ -155,17 +155,21 @@ app.get('/api/purchases', asyncRoute(async (_req, res) => {
   res.json(rows);
 }));
 
-app.post('/api/purchases', asyncRoute(async (req, res) => {
-  const merchant = cleanString(req.body.merchant, 120);
-  const category = cleanString(req.body.category, 60);
-  const note = cleanString(req.body.note, 500);
-  const amount = parseMoney(req.body.amount);
-  const date = req.body.purchase_date;
-  const accountId = req.body.account_id === null || req.body.account_id === undefined || req.body.account_id === '' ? null : positiveId(req.body.account_id);
+async function savePurchase(req, res) {
+  const id = req.params.id === undefined ? null : positiveId(req.params.id);
+  if (req.params.id !== undefined && !id) return fail(res, 400, 'Invalid purchase ID.');
+  const body = req.body || {};
+  const merchant = cleanString(body.merchant, 120);
+  const category = cleanString(body.category, 60);
+  const note = cleanString(body.note, 500);
+  const amount = parseMoney(body.amount);
+  const date = body.purchase_date;
+  const unassigned = body.account_id === null || body.account_id === undefined || body.account_id === '';
+  const accountId = unassigned ? null : positiveId(body.account_id);
   if (!merchant || merchant.length > 120 || !category || category.length > 60 || note.length > 500 || !validDate(date) || amount === null || amount <= 0) {
     return fail(res, 400, 'Enter a date, merchant, category, and positive amount.');
   }
-  if (req.body.account_id && !accountId) return fail(res, 400, 'Choose a valid account.');
+  if (!unassigned && !accountId) return fail(res, 400, 'Choose a valid account.');
   if (accountId) {
     const [accounts] = await getPool().execute('SELECT id FROM accounts WHERE id = ?', [accountId]);
     if (!accounts.length) return fail(res, 400, 'Choose an existing account.');
@@ -179,15 +183,29 @@ app.post('/api/purchases', asyncRoute(async (req, res) => {
       await connection.rollback();
       return fail(res, 400, 'Choose an existing category or create a new one.');
     }
+    const values = [accountId, date, merchant, categories[0].name, amount, note || null];
+    if (id) {
+      const [existing] = await connection.execute('SELECT id FROM purchases WHERE id = ? FOR UPDATE', [id]);
+      if (!existing.length) {
+        await connection.rollback();
+        return fail(res, 404, 'Purchase not found.');
+      }
+      await connection.execute('UPDATE purchases SET account_id = ?, purchase_date = ?, merchant = ?, category = ?, amount = ?, note = ? WHERE id = ?', [...values, id]);
+      await connection.commit();
+      return res.json({ id });
+    }
     const [result] = await connection.execute(`INSERT INTO purchases (account_id, purchase_date, merchant, category, amount, note)
-      VALUES (?, ?, ?, ?, ?, ?)`, [accountId, date, merchant, categories[0].name, amount, note || null]);
+      VALUES (?, ?, ?, ?, ?, ?)`, values);
     await connection.commit();
     res.status(201).json({ id: result.insertId });
   } catch (error) {
     await connection.rollback();
     throw error;
   } finally { connection.release(); }
-}));
+}
+
+app.post('/api/purchases', asyncRoute(savePurchase));
+app.put('/api/purchases/:id', asyncRoute(savePurchase));
 
 app.delete('/api/purchases/:id', asyncRoute(async (req, res) => {
   const id = positiveId(req.params.id);

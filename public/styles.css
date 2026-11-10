@@ -33,3 +33,4 @@
 .button-danger{background:#fff0ee;color:#a74949}
 .button-danger:hover{background:#ffe3df}
 @media(max-width:760px){.managed-category-row{align-items:flex-start;flex-direction:column}}
+.purchase-actions{display:flex;align-items:center;justify-content:flex-end;gap:14px}
